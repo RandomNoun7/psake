@@ -204,7 +204,11 @@ function Task {
         if ($taskModule = Get-Module -Name $FromModule) {
             # Use the task module that is already loaded into the session
             if ($Version) {
-                $taskModule = $taskModule | Where-Object {$_.Version -eq $Version}
+                $comparison = {
+                    ($_.Version.Major -eq $Version.Major) -and
+                    ($_.Version.Minor -ge $Version.Minor)
+                }
+                $taskModule = $taskModule | Where-Object -FilterScript $comparison
             } else {
                 $taskModule = $taskModule | Sort-Object -Property Version -Descending | Select-Object -First 1
             }
