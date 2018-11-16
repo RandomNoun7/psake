@@ -49,7 +49,16 @@ function Task {
         Load in the task from the specified PowerShell module.
 
         .PARAMETER Version
-        The version of the PowerShell module to load in the task from.
+        The specific version of a module to load the task from
+
+        .PARAMETER minimumVersion
+        The minimum (inclusive) version of the PowerShell module to load in the task from.
+
+        .PARAMETER maximumVersion
+        The maximum (inclusive) version of the PowerShell module to load in the task from.
+
+        .PARAMETER lessThanVersion
+        The version of the PowerShell module to load in the task from that should not be met or exceeded. eg -lessThanVersion 2.0.0 will reject anything 2.0.0 or higher, allowing any module in the 1.x.x series.
 
         .EXAMPLE
         A sample build script is shown below:
@@ -165,8 +174,16 @@ function Task {
         [string]$FromModule,
 
         [parameter(ParameterSetName = 'SharedTask', Position = 12)]
-        [ValidateNotNullOrEmpty()]
-        [version]$Version
+        [string]$Version,
+
+        [parameter(ParameterSetName = 'SharedTask', Position = 13)]
+        [string]$minimumVersion,
+
+        [parameter(ParameterSetName = 'SharedTask', Position = 14)]
+        [string]$maximumVersion,
+
+        [parameter(ParameterSetName = 'SharedTask', Position = 15)]
+        [string]$lessThanVersion
     )
 
     function CreateTask {
@@ -200,37 +217,33 @@ function Task {
 
     # Dot source the shared task module to load in its tasks
     if ($PSCmdlet.ParameterSetName -eq 'SharedTask') {
+        $testModuleParams = @{
+            minimumVersion  = $minimumVersion
+            maximumVersion  = $maximumVersion
+            lessThanVersion = $lessThanVersion
+        }
+
+        if(![string]::IsNullOrEmpty($Version)){
+            $testModuleParams.minimumVersion = $Version
+            $testModuleParams.maximumVersion = $Version
+        }
 
         if ($taskModule = Get-Module -Name $FromModule) {
             # Use the task module that is already loaded into the session
-            if ($Version) {
-                $comparison = {
-                    ($_.Version.Major -eq $Version.Major) -and
-                    ($_.Version.Minor -ge $Version.Minor)
-                }
-                $taskModule = $taskModule | Where-Object -FilterScript $comparison
-            } else {
-                $taskModule = $taskModule | Sort-Object -Property Version -Descending | Select-Object -First 1
-            }
+            $testModuleParams.currentVersion  = $taskModule.Version
+            $taskModule = Where-Object -InputObject $taskModule -FilterScript {Test-ModuleVersion @testModuleParams}
         } else {
             # Find the module
-            $moduleSpec = @{
-                ModuleName = $FromModule
-            }
-            if ($Version) {
-                $moduleSpec.RequiredVersion = $Version
-            }
             $getModuleParams = @{
                 ListAvailable = $true
+                Name          = $FromModule
                 ErrorAction   = 'Ignore'
                 Verbose       = $false
             }
-            if ($moduleSpec.RequiredVersion) {
-                $getModuleParams.FullyQualifiedName = $moduleSpec
-            } else {
-                $getModuleParams.Name = $moduleSpec.ModuleName
-            }
-            $taskModule = Get-Module @getModuleParams | Sort-Object -Property Version -Descending | Select-Object -First 1
+            $taskModule = Get-Module @getModuleParams |
+                            Where-Object -FilterScript {Test-ModuleVersion -currentVersion $_.Version @testModuleParams} |
+                            Sort-Object -Property Version -Descending |
+                            Select-Object -First 1
         }
 
         # This task references a task from a module
